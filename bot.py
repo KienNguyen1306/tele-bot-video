@@ -1,34 +1,49 @@
-import json
-import os
 import random
 import string
+import mysql.connector
+
 from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
-from config import TOKEN, TARGET_CHAT_ID
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    CommandHandler,
+    filters,
+    ContextTypes
+)
 
-STORAGE_FILE = "videos.json"
+from config import TOKEN, TARGET_CHAT_IDS, DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
+
+# =========================
+# MYSQL CONNECTION
+# =========================
+db = mysql.connector.connect(
+    host=DB_HOST,
+    user=DB_USER,
+    password=DB_PASSWORD,
+    database=DB_NAME
+)
 
 
-def load():
-    return json.load(open(STORAGE_FILE)) if os.path.exists(STORAGE_FILE) else {}
+cur = db.cursor()
 
 
-def save(data):
-    json.dump(data, open(STORAGE_FILE, "w"), indent=2)
-
-
-def random_key(data, length=6):
+# =========================
+# RANDOM KEY (MYSQL CHECK)
+# =========================
+def random_key(length=6):
     while True:
         key = ''.join(random.choices(
-            string.ascii_letters + string.digits, k=length))
-        if key not in data:
+            string.ascii_letters + string.digits, k=length
+        ))
+
+        cur.execute("SELECT `key` FROM videos WHERE `key`=%s", (key,))
+        if not cur.fetchone():
             return key
 
 
-videos = load()
-
-
-# 🔥 HANDLE VIDEO
+# =========================
+# HANDLE VIDEO
+# =========================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
 
@@ -37,23 +52,29 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     file_id = video.file_id
+    caption = msg.caption or ""
 
-    key = random_key(videos)
+    key = random_key()
     bot_username = (await context.bot.get_me()).username
     link = f"https://t.me/{bot_username}?start={key}"
 
-    videos[key] = {
-        "file_id": file_id,
-        "caption": msg.caption or "",
-        "link": link
-    }
-    save(videos)
-    caption = (
-        f"{msg.caption or ''}\n\n"
-        f"🔗 {link}"
-    )
+    # =========================
+    # SAVE TO MYSQL
+    # =========================
+    sql = """
+        INSERT INTO videos (`key`, file_id, caption, link)
+        VALUES (%s, %s, %s, %s)
+    """
+    val = (key, file_id, caption, link)
 
-    # gửi ảnh preview
+    cur.execute(sql, val)
+    db.commit()
+
+    full_caption = f"{caption}\n\n🔗 {link}"
+
+    # =========================
+    # SEND TO TARGET CHATS
+    # =========================
     if msg.video and msg.video.thumbnail:
         thumb = msg.video.thumbnail
         file = await context.bot.get_file(thumb.file_id)
@@ -61,51 +82,67 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         path = f"{thumb.file_id}.jpg"
         await file.download_to_drive(path)
 
-        await context.bot.send_photo(
-            chat_id=TARGET_CHAT_ID,
-            photo=open(path, "rb"),
-            caption=caption
-        )
+        for chat_id in TARGET_CHAT_IDS:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=open(path, "rb"),
+                caption=full_caption
+            )
 
+        import os
         os.remove(path)
+
     else:
-        await context.bot.send_video(
-            chat_id=TARGET_CHAT_ID,
-            video=file_id,
-            caption=caption
-        )
+        for chat_id in TARGET_CHAT_IDS:
+            await context.bot.send_video(
+                chat_id=chat_id,
+                video=file_id,
+                caption=full_caption
+            )
 
     await msg.reply_text(
-        f"✅ Đã lưu!\n"
+        f"✅ Đã lưu MySQL!\n"
         f"🔑 Key: {key}\n"
-        f"🔗 https://t.me/{bot_username}?start={key}"
+        f"🔗 {link}"
     )
 
 
-# 🔥 HANDLE START
+# =========================
+# HANDLE START (/start key)
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    VIDEO_MAP = load()
     payload = context.args[0] if context.args else None
 
-    if payload and payload in VIDEO_MAP:
-        data = VIDEO_MAP[payload]
-
-        await update.message.reply_video(
-            video=data["file_id"],
-            caption=data.get("caption", "")
+    if payload:
+        cur.execute(
+            "SELECT file_id, caption FROM videos WHERE `key`=%s",
+            (payload,)
         )
-    elif payload:
-        await update.message.reply_text("❌ Không tìm thấy video.")
+        row = cur.fetchone()
+
+        if row:
+            file_id, caption = row
+
+            await update.message.reply_video(
+                video=file_id,
+                caption=caption
+            )
+        else:
+            await update.message.reply_text("❌ Không tìm thấy video.")
     else:
         await update.message.reply_text("👋 Xin chào!")
 
 
-# 🚀 RUN BOT
+# =========================
+# RUN BOT
+# =========================
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(
-    filters.VIDEO | filters.Document.ALL, handle_video))
+    filters.VIDEO | filters.Document.ALL,
+    handle_video
+))
 
-print("✅ Bot đang chạy...")
+print("✅ Bot đang chạy MySQL...")
 app.run_polling()
