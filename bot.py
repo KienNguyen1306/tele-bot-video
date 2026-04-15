@@ -36,7 +36,7 @@ def random_key(length=6):
             string.ascii_letters + string.digits, k=length
         ))
 
-        cur.execute("SELECT `key` FROM videos WHERE `key`=%s", (key,))
+        cur.execute("SELECT `vkey` FROM videos WHERE `vkey`=%s", (key,))
         if not cur.fetchone():
             return key
 
@@ -62,7 +62,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # SAVE TO MYSQL
     # =========================
     sql = """
-        INSERT INTO videos (`key`, file_id, caption, link)
+        INSERT INTO videos (`vkey`, file_id, caption, link)
         VALUES (%s, %s, %s, %s)
     """
     val = (key, file_id, caption, link)
@@ -115,7 +115,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if payload:
         cur.execute(
-            "SELECT file_id, caption FROM videos WHERE `key`=%s",
+            "SELECT file_id, caption FROM videos WHERE `vkey`=%s",
             (payload,)
         )
         row = cur.fetchone()
