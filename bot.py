@@ -47,7 +47,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "caption": msg.caption or "",
         "link": link
     }
-
+    save(videos)
     caption = (
         f"{msg.caption or ''}\n\n"
         f"🔗 {link}"

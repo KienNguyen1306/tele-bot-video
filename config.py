@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+import os
 
-TOKEN = "8630856498:AAHi8CLjxtg6TCEYc7D8xCtS6swCQjlTwMI"  # token của bạn
-TARGET_CHAT_ID = -1003707496482
+load_dotenv()
+
+TOKEN = os.getenv("TOKEN")
+TARGET_CHAT_ID = int(os.getenv("TARGET_CHAT_ID"))
